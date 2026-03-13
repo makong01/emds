@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "reconcile": "node infra/scripts/reconcile-sites.mjs",
-    "deploy:changed": "node infra/scripts/deploy-changed-sites.mjs"
+    "deploy:changed": "node infra/scripts/deploy-changed-sites.mjs",
+    "render:wrangler": "node infra/scripts/render-wrangler-files.mjs"
   },
   "devDependencies": {
     "tldts": "^7.0.15",

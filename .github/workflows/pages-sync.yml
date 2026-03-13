@@ -7,12 +7,13 @@ on:
       - "sites/**"
       - "infra/sites.json"
       - "infra/scripts/**"
+      - "package.json"
       - ".github/workflows/pages-sync.yml"
 
   workflow_dispatch:
     inputs:
       domain:
-        description: "Deploy only one domain, e.g. emds1.makong.cc"
+        description: "Deploy only one domain"
         required: false
         type: string
 
@@ -33,6 +34,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Generate missing wrangler.jsonc files
+        run: npm run render:wrangler
 
       - name: Reconcile Pages / domains / DNS
         env:
@@ -60,6 +64,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Generate missing wrangler.jsonc files
+        run: npm run render:wrangler
 
       - name: Deploy changed sites
         env:
