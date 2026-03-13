@@ -250,7 +250,7 @@ export async function getZone(zoneName) {
   const zones = await cf(`/zones?name=${encodeURIComponent(zoneName)}`);
   return zones[0] || null;
 }
-
+/*
 export async function createZone(zoneName) {
   return await cf(`/zones`, {
     method: "POST",
@@ -260,6 +260,37 @@ export async function createZone(zoneName) {
       jump_start: true
     })
   });
+}*/
+
+export async function createZone(zoneName) {
+  const delays = [5000, 10000, 20000, 30000];
+  let lastError;
+
+  for (let attempt = 1; attempt <= delays.length + 1; attempt++) {
+    try {
+      console.log(`Creating zone ${zoneName} (attempt ${attempt}/${delays.length + 1})`);
+
+      return await cf(`/zones`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: zoneName,
+          type: "full",
+          jump_start: true
+        })
+      });
+    } catch (error) {
+      lastError = error;
+      console.error(`createZone failed for ${zoneName} on attempt ${attempt}: ${error.message}`);
+
+      if (attempt <= delays.length) {
+        const delay = delays[attempt - 1];
+        console.log(`Waiting ${delay}ms before retry...`);
+        await sleep(delay);
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 export async function listDnsRecords(zoneId, name) {
