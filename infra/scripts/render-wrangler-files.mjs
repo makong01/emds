@@ -6,12 +6,12 @@ function getCurrentCompatibilityDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function buildWranglerConfig(site) {
+function buildWranglerConfig(site, existing = null) {
   return {
     name: site.project,
-    pages_build_output_dir: site.build_output_dir || "public",
-    compatibility_date: getCurrentCompatibilityDate(),
-    r2_buckets: [
+    pages_build_output_dir: existing?.pages_build_output_dir || site.build_output_dir || "public",
+    compatibility_date: existing?.compatibility_date || getCurrentCompatibilityDate(),
+    r2_buckets: existing?.r2_buckets || [
       {
         binding: site.r2_binding_name || "MEDIA",
         bucket_name: site.r2_bucket || "emd"
@@ -20,12 +20,12 @@ function buildWranglerConfig(site) {
   };
 }
 
-async function fileExists(filePath) {
+async function readJsonIfExists(filePath) {
   try {
-    await fs.access(filePath);
-    return true;
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -39,17 +39,24 @@ async function main() {
 
   for (const site of sites) {
     const filePath = path.join(site.root_dir, "wrangler.jsonc");
-    const exists = await fileExists(filePath);
+    const existing = await readJsonIfExists(filePath);
 
-    if (exists) {
-      console.log(`Skipping existing ${filePath}`);
+    const needsWrite =
+      !existing ||
+      existing.name !== site.project ||
+      !existing.pages_build_output_dir ||
+      !existing.compatibility_date ||
+      !Array.isArray(existing.r2_buckets) ||
+      existing.r2_buckets.length === 0;
+
+    if (!needsWrite) {
+      console.log(`Keeping existing ${filePath}`);
       continue;
     }
 
-    const config = buildWranglerConfig(site);
+    const config = buildWranglerConfig(site, existing);
     await writeJsonc(filePath, config);
-
-    console.log(`Generated ${filePath}`);
+    console.log(`Wrote ${filePath}`);
   }
 }
 

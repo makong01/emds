@@ -40,6 +40,12 @@ jobs:
       - name: Generate missing wrangler.jsonc files
         run: npm run render:wrangler
 
+      - name: debug file
+        run: |
+            echo "=== wrangler files ==="
+            find sites -name "wrangler.jsonc" -print
+            echo "=== emds config ==="
+
       - name: Reconcile Pages / domains / DNS
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
