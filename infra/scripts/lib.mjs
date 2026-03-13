@@ -4,25 +4,33 @@ import { parse as parseDomain } from "tldts";
 
 export const API = "https://api.cloudflare.com/client/v4";
 
-export const ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
-export const TOKEN = process.env.CF_API_TOKEN;
+function getCloudflareEnv() {
+  const accountId = process.env.CF_ACCOUNT_ID;
+  const token = process.env.CF_API_TOKEN;
 
-if (!ACCOUNT_ID || !TOKEN) {
-  throw new Error("Missing CF_ACCOUNT_ID or CF_API_TOKEN");
+  if (!accountId || !token) {
+    throw new Error("Missing CF_ACCOUNT_ID or CF_API_TOKEN");
+  }
+
+  return { accountId, token };
 }
 
-const headers = {
-  Authorization: `Bearer ${TOKEN}`,
-  "Content-Type": "application/json"
-};
+function getHeaders(extraHeaders = {}) {
+  const { token } = getCloudflareEnv();
+
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    ...extraHeaders
+  };
+}
 
 export async function cf(pathname, init = {}) {
+  const { accountId } = getCloudflareEnv();
+
   const res = await fetch(`${API}${pathname}`, {
     ...init,
-    headers: {
-      ...headers,
-      ...(init.headers || {})
-    }
+    headers: getHeaders(init.headers || {})
   });
 
   const json = await res.json();
@@ -99,19 +107,22 @@ export async function loadDesiredSites() {
 }
 
 export function runWrangler(args, cwd = process.cwd()) {
+  const { accountId, token } = getCloudflareEnv();
+
   execFileSync("npx", ["wrangler", ...args], {
     cwd,
     stdio: "inherit",
     env: {
       ...process.env,
-      CLOUDFLARE_API_TOKEN: TOKEN,
-      CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID
+      CLOUDFLARE_API_TOKEN: token,
+      CLOUDFLARE_ACCOUNT_ID: accountId
     }
   });
 }
 
 export async function listPagesProjects() {
-  return await cf(`/accounts/${ACCOUNT_ID}/pages/projects`);
+  const { accountId } = getCloudflareEnv();
+  return await cf(`/accounts/${accountId}/pages/projects`);
 }
 
 export async function getPagesProject(projectName) {
@@ -131,7 +142,8 @@ export function createPagesProject(projectName, productionBranch) {
 }
 
 export async function listProjectDomains(projectName) {
-  return await cf(`/accounts/${ACCOUNT_ID}/pages/projects/${projectName}/domains`);
+  const { accountId } = getCloudflareEnv();
+  return await cf(`/accounts/${accountId}/pages/projects/${projectName}/domains`);
 }
 
 export async function ensureProject(site) {
@@ -147,6 +159,7 @@ export async function ensureProject(site) {
 }
 
 export async function ensureCustomDomain(projectName, domain) {
+  const { accountId } = getCloudflareEnv();
   const domains = await listProjectDomains(projectName);
   const exists = domains.some((d) => d.name === domain);
 
@@ -155,7 +168,7 @@ export async function ensureCustomDomain(projectName, domain) {
     return;
   }
 
-  await cf(`/accounts/${ACCOUNT_ID}/pages/projects/${projectName}/domains`, {
+  await cf(`/accounts/${accountId}/pages/projects/${projectName}/domains`, {
     method: "POST",
     body: JSON.stringify({ name: domain })
   });
