@@ -130,6 +130,40 @@ export async function getPagesProject(projectName) {
   return projects.find((p) => p.name === projectName) || null;
 }
 
+/*
+export function createPagesProject(projectName, productionBranch) {
+  runWrangler([
+    "pages",
+    "project",
+    "create",
+    projectName,
+    "--production-branch",
+    productionBranch
+  ]);
+}*/
+
+export async function listProjectDomains(projectName) {
+  const { accountId } = getCloudflareEnv();
+  return await cf(`/accounts/${accountId}/pages/projects/${projectName}/domains`);
+}
+
+/*
+export async function ensureProject(site) {
+  const existing = await getPagesProject(site.project);
+
+  if (existing) {
+    console.log(`Pages project exists: ${site.project}`);
+    return;
+  }
+
+  console.log(`Creating Pages project: ${site.project}`);
+  createPagesProject(site.project, site.production_branch || "main");
+}*/
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function createPagesProject(projectName, productionBranch) {
   runWrangler([
     "pages",
@@ -141,11 +175,6 @@ export function createPagesProject(projectName, productionBranch) {
   ]);
 }
 
-export async function listProjectDomains(projectName) {
-  const { accountId } = getCloudflareEnv();
-  return await cf(`/accounts/${accountId}/pages/projects/${projectName}/domains`);
-}
-
 export async function ensureProject(site) {
   const existing = await getPagesProject(site.project);
 
@@ -154,8 +183,49 @@ export async function ensureProject(site) {
     return;
   }
 
-  console.log(`Creating Pages project: ${site.project}`);
-  createPagesProject(site.project, site.production_branch || "main");
+  const maxAttempts = 4;
+  const delays = [5000, 10000, 20000, 30000];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(
+        `Creating Pages project: ${site.project} (attempt ${attempt}/${maxAttempts})`
+      );
+
+      createPagesProject(site.project, site.production_branch || "main");
+
+      const created = await getPagesProject(site.project);
+      if (created) {
+        console.log(`Pages project created: ${site.project}`);
+        return;
+      }
+
+      console.log(
+        `Create command finished but project not visible yet: ${site.project}`
+      );
+    } catch (error) {
+      console.error(
+        `Pages project create failed for ${site.project} on attempt ${attempt}:`,
+        error.message
+      );
+    }
+
+    const maybeExists = await getPagesProject(site.project);
+    if (maybeExists) {
+      console.log(`Pages project appeared after retry check: ${site.project}`);
+      return;
+    }
+
+    if (attempt < maxAttempts) {
+      const delay = delays[attempt - 1] || 10000;
+      console.log(`Waiting ${delay}ms before retry...`);
+      await sleep(delay);
+    }
+  }
+
+  throw new Error(
+    `Failed to create Pages project after retries: ${site.project}`
+  );
 }
 
 export async function ensureCustomDomain(projectName, domain) {
