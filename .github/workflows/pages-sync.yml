@@ -1,21 +1,48 @@
-name: Deploy Changed Pages Sites
+name: Reconcile and Deploy Pages Sites
 
 on:
-  workflow_dispatch:
-    inputs:
-      domain:
-        description: "Deploy only one domain"
-        required: false
-        type: string
-
   push:
     branches: [main]
     paths:
       - "sites/**"
+      - "infra/sites.json"
+      - "infra/scripts/**"
+      - ".github/workflows/pages-sync.yml"
+
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Deploy only one domain, e.g. emds1.makong.cc"
+        required: false
+        type: string
 
 jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Reconcile Pages / domains / DNS
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: node infra/scripts/reconcile-sites.mjs
+
   deploy:
     runs-on: ubuntu-latest
+    needs: reconcile
     concurrency:
       group: deploy-pages-${{ github.ref }}
       cancel-in-progress: false
@@ -33,12 +60,6 @@ jobs:
 
       - name: Install dependencies
         run: npm install
-
-      - name: Reconcile before deploy
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: node infra/scripts/reconcile-sites.mjs
 
       - name: Deploy changed sites
         env:

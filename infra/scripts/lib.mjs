@@ -179,31 +179,6 @@ export async function createZone(zoneName) {
   });
 }
 
-export async function ensureZoneForSite(site) {
-  const zone = await getZone(site.zone_name);
-
-  if (zone) {
-    console.log(`Zone exists: ${site.zone_name} [status=${zone.status}]`);
-    return zone;
-  }
-
-  if (!site.is_apex) {
-    throw new Error(
-      `Missing parent zone ${site.zone_name} for subdomain ${site.domain}`
-    );
-  }
-
-  console.log(`Creating zone for apex site: ${site.zone_name}`);
-  const created = await createZone(site.zone_name);
-
-  console.log(`Zone created: ${site.zone_name} [status=${created.status}]`);
-  console.log(
-    `IMPORTANT: apex site may remain pending until nameservers are delegated at registrar.`
-  );
-
-  return created;
-}
-
 export async function listDnsRecords(zoneId, name) {
   return await cf(`/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`);
 }
@@ -220,6 +195,31 @@ export async function updateDnsRecord(zoneId, recordId, payload) {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
+}
+
+export async function ensureZoneForSite(site) {
+  let zone = await getZone(site.zone_name);
+
+  if (zone) {
+    console.log(`Zone exists: ${site.zone_name} [status=${zone.status}]`);
+    return zone;
+  }
+
+  if (!site.is_apex) {
+    throw new Error(
+      `Parent zone ${site.zone_name} not found for subdomain ${site.domain}`
+    );
+  }
+
+  console.log(`Creating zone for apex site: ${site.zone_name}`);
+  zone = await createZone(site.zone_name);
+
+  console.log(`Zone created: ${site.zone_name} [status=${zone.status}]`);
+  console.log(
+    `IMPORTANT: apex site may remain pending until nameservers are delegated at registrar.`
+  );
+
+  return zone;
 }
 
 export async function ensureSubdomainCname(site) {
@@ -272,7 +272,7 @@ export async function ensureSiteInfra(site) {
     await ensureSubdomainCname(site);
   } else {
     console.log(
-      `Apex site ${site.domain}: zone must be active in this account; no manual CNAME bootstrap applied.`
+      `Apex site ${site.domain}: zone has been ensured in this account.`
     );
   }
 }
