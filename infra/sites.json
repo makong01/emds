@@ -14,6 +14,10 @@
     "emds2.makong.cc": {
       "zone_name": "makong.cc",
       "is_apex": false
+    },
+    "makong.kiev.ua": {
+      "zone_name": "makong.cc",
+      "is_apex": false
     }
   }
 }
