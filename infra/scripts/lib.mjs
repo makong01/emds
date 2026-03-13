@@ -284,7 +284,7 @@ export async function createZone(zoneName) {
       });
     } catch (error) {
       lastError = error;
-      console.error(`createZone failed for ${zoneName} on attempt ${attempt}: ${error.message}`);
+      console.error(`createZone failed for ${zoneName} ${accountId} on attempt ${attempt}: ${error.message}`);
 
       if (attempt <= delays.length) {
         const delay = delays[attempt - 1];
