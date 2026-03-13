@@ -1,0 +1,278 @@
+import fs from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { parse as parseDomain } from "tldts";
+
+export const API = "https://api.cloudflare.com/client/v4";
+
+export const ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
+export const TOKEN = process.env.CF_API_TOKEN;
+
+if (!ACCOUNT_ID || !TOKEN) {
+  throw new Error("Missing CF_ACCOUNT_ID or CF_API_TOKEN");
+}
+
+const headers = {
+  Authorization: `Bearer ${TOKEN}`,
+  "Content-Type": "application/json"
+};
+
+export async function cf(pathname, init = {}) {
+  const res = await fetch(`${API}${pathname}`, {
+    ...init,
+    headers: {
+      ...headers,
+      ...(init.headers || {})
+    }
+  });
+
+  const json = await res.json();
+
+  if (!json.success) {
+    throw new Error(
+      `Cloudflare API error on ${pathname}: ${JSON.stringify(json.errors)}`
+    );
+  }
+
+  return json.result;
+}
+
+export async function readJson(file) {
+  const raw = await fs.readFile(file, "utf8");
+  return JSON.parse(raw);
+}
+
+export function slugProjectName(domain) {
+  return domain
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]/g, "-")
+    .replace(/\./g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+export function inferSiteFromFolder(folderName) {
+  const parsed = parseDomain(folderName);
+
+  if (!parsed.domain) {
+    throw new Error(
+      `Cannot infer zone/domain from folder "${folderName}". Use a valid domain-like folder name.`
+    );
+  }
+
+  return {
+    domain: folderName,
+    project: slugProjectName(folderName),
+    root_dir: `sites/${folderName}`,
+    zone_name: parsed.domain,
+    is_apex: !parsed.subdomain
+  };
+}
+
+export async function listSiteFolders() {
+  const entries = await fs.readdir("sites", { withFileTypes: true });
+
+  return entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+}
+
+export async function loadDesiredSites() {
+  const manifest = await readJson("infra/sites.json");
+  const defaults = manifest.defaults || {};
+  const overrides = manifest.overrides || {};
+
+  const folders = await listSiteFolders();
+
+  const sites = folders.map((folder) => {
+    const inferred = inferSiteFromFolder(folder);
+    const override = overrides[inferred.domain] || {};
+
+    return {
+      ...defaults,
+      ...inferred,
+      ...override
+    };
+  });
+
+  return { defaults, sites };
+}
+
+export function runWrangler(args, cwd = process.cwd()) {
+  execFileSync("npx", ["wrangler", ...args], {
+    cwd,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      CLOUDFLARE_API_TOKEN: TOKEN,
+      CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID
+    }
+  });
+}
+
+export async function listPagesProjects() {
+  return await cf(`/accounts/${ACCOUNT_ID}/pages/projects`);
+}
+
+export async function getPagesProject(projectName) {
+  const projects = await listPagesProjects();
+  return projects.find((p) => p.name === projectName) || null;
+}
+
+export function createPagesProject(projectName, productionBranch) {
+  runWrangler([
+    "pages",
+    "project",
+    "create",
+    projectName,
+    "--production-branch",
+    productionBranch
+  ]);
+}
+
+export async function listProjectDomains(projectName) {
+  return await cf(`/accounts/${ACCOUNT_ID}/pages/projects/${projectName}/domains`);
+}
+
+export async function ensureProject(site) {
+  const existing = await getPagesProject(site.project);
+
+  if (existing) {
+    console.log(`Pages project exists: ${site.project}`);
+    return;
+  }
+
+  console.log(`Creating Pages project: ${site.project}`);
+  createPagesProject(site.project, site.production_branch || "main");
+}
+
+export async function ensureCustomDomain(projectName, domain) {
+  const domains = await listProjectDomains(projectName);
+  const exists = domains.some((d) => d.name === domain);
+
+  if (exists) {
+    console.log(`Custom domain already attached: ${domain}`);
+    return;
+  }
+
+  await cf(`/accounts/${ACCOUNT_ID}/pages/projects/${projectName}/domains`, {
+    method: "POST",
+    body: JSON.stringify({ name: domain })
+  });
+
+  console.log(`Attached custom domain ${domain} -> ${projectName}`);
+}
+
+export async function getZone(zoneName) {
+  const zones = await cf(`/zones?name=${encodeURIComponent(zoneName)}`);
+  return zones[0] || null;
+}
+
+export async function createZone(zoneName) {
+  return await cf(`/zones`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: zoneName,
+      type: "full",
+      jump_start: true
+    })
+  });
+}
+
+export async function ensureZoneForSite(site) {
+  const zone = await getZone(site.zone_name);
+
+  if (zone) {
+    console.log(`Zone exists: ${site.zone_name} [status=${zone.status}]`);
+    return zone;
+  }
+
+  if (!site.is_apex) {
+    throw new Error(
+      `Missing parent zone ${site.zone_name} for subdomain ${site.domain}`
+    );
+  }
+
+  console.log(`Creating zone for apex site: ${site.zone_name}`);
+  const created = await createZone(site.zone_name);
+
+  console.log(`Zone created: ${site.zone_name} [status=${created.status}]`);
+  console.log(
+    `IMPORTANT: apex site may remain pending until nameservers are delegated at registrar.`
+  );
+
+  return created;
+}
+
+export async function listDnsRecords(zoneId, name) {
+  return await cf(`/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`);
+}
+
+export async function createDnsRecord(zoneId, payload) {
+  return await cf(`/zones/${zoneId}/dns_records`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateDnsRecord(zoneId, recordId, payload) {
+  return await cf(`/zones/${zoneId}/dns_records/${recordId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function ensureSubdomainCname(site) {
+  const zone = await getZone(site.zone_name);
+
+  if (!zone) {
+    throw new Error(
+      `Parent zone ${site.zone_name} not found for subdomain ${site.domain}`
+    );
+  }
+
+  const records = await listDnsRecords(zone.id, site.domain);
+  const existing = records.find((r) => r.type === "CNAME");
+  const desiredContent = `${site.project}.pages.dev`;
+
+  if (!existing) {
+    await createDnsRecord(zone.id, {
+      type: "CNAME",
+      name: site.domain,
+      content: desiredContent,
+      proxied: true
+    });
+
+    console.log(`Created CNAME ${site.domain} -> ${desiredContent}`);
+    return;
+  }
+
+  const needsUpdate =
+    existing.content !== desiredContent || existing.proxied !== true;
+
+  if (!needsUpdate) {
+    console.log(`DNS CNAME already correct for ${site.domain}`);
+    return;
+  }
+
+  await updateDnsRecord(zone.id, existing.id, {
+    content: desiredContent,
+    proxied: true
+  });
+
+  console.log(`Updated CNAME ${site.domain} -> ${desiredContent}`);
+}
+
+export async function ensureSiteInfra(site) {
+  await ensureProject(site);
+  await ensureZoneForSite(site);
+  await ensureCustomDomain(site.project, site.domain);
+
+  if (!site.is_apex) {
+    await ensureSubdomainCname(site);
+  } else {
+    console.log(
+      `Apex site ${site.domain}: zone must be active in this account; no manual CNAME bootstrap applied.`
+    );
+  }
+}

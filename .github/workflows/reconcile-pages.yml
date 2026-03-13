@@ -1,0 +1,35 @@
+name: Reconcile Pages Control Plane
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "sites/**"
+      - "infra/sites.json"
+      - "infra/scripts/**"
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Reconcile Pages / domains / DNS
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: node infra/scripts/reconcile-sites.mjs

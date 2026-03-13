@@ -1,0 +1,51 @@
+name: Deploy Changed Pages Sites
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Deploy only one domain"
+        required: false
+        type: string
+
+  push:
+    branches: [main]
+    paths:
+      - "sites/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-pages-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Reconcile before deploy
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: node infra/scripts/reconcile-sites.mjs
+
+      - name: Deploy changed sites
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          GITHUB_BASE_SHA: ${{ github.event.before }}
+          GITHUB_SHA: ${{ github.sha }}
+          ONLY_DOMAIN: ${{ inputs.domain }}
+        run: node infra/scripts/deploy-changed-sites.mjs
