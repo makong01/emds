@@ -264,6 +264,7 @@ export async function createZone(zoneName) {
 
 export async function createZone(zoneName) {
   const delays = [5000, 10000, 20000, 30000];
+  const { accountId } = getCloudflareEnv();
   let lastError;
 
   for (let attempt = 1; attempt <= delays.length + 1; attempt++) {
@@ -274,6 +275,9 @@ export async function createZone(zoneName) {
         method: "POST",
         body: JSON.stringify({
           name: zoneName,
+          account:{
+            id: accountId
+          },
           type: "full",
           jump_start: true
         })
